@@ -321,7 +321,7 @@ std::vector< std::pair<Expression<Type>*, double> > GeneratePopulation(const Typ
 
 // Function to perform genetic algorithm
 template<typename Type>
-void GeneticAlgorithm(const Type& target, const size_t& populationSize, const size_t& generations, const double& selectionPercentage, const size_t & maxDepth = 3, const double& prunningProbability = 0.0f) {
+void GeneticAlgorithm(const Type& target, const size_t& populationSize, const size_t& generations, const double& selectionPercentage, const size_t & maxDepth = 3, const double& prunningProbability = 0.0f, const bool& isVerbose = true) {
     srand( time( nullptr ) );
 
     // Initialize the population with random expression trees
@@ -374,7 +374,8 @@ void GeneticAlgorithm(const Type& target, const size_t& populationSize, const si
                       return a.second > b.second;
                   });
 
-        fprintf(stdout, "Generation %d, Best Fitness : %.6lf\n", generation+1, population.front().second);
+        if( isVerbose )
+            fprintf(stdout, "Generation %d, Best Fitness : %.6lf\n", generation+1, population.front().second);
 
         if(population.front().second >= 1.0f)
             break;
@@ -401,10 +402,10 @@ int main(int argc, char *argv[]){
     double selectionPercentage = 0.2;
     size_t maxDepth = 2;
     double prunningProbability = 0.1f;
+    bool isVerbal = true;
 
     // Run the genetic algorithm
-    GeneticAlgorithm(targetValue, populationSize, generations, selectionPercentage, maxDepth, prunningProbability);
-
+    GeneticAlgorithm(targetValue, populationSize, generations, selectionPercentage, maxDepth, prunningProbability, isVerbal);
 
     return 0;
 }
