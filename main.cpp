@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <vector>
+#include <memory>
 
 // Definition of abstract class which represents expression
 template<typename Type>
@@ -29,6 +30,19 @@ public:
 
     virtual bool IsValid(){
         return left != nullptr && right != nullptr;
+    };
+
+    size_t GetDepth() const{
+        size_t leftDepth = 0;
+        size_t rightDepth = 0;
+
+        if(left)
+            leftDepth = left->GetDepth();
+
+        if(right)
+            rightDepth = right->GetDepth();
+
+        return std::max(leftDepth, rightDepth ) + 1;
     };
 
     void Prune() {
@@ -200,7 +214,7 @@ template<typename Type>
 Expression<Type>* GenerateRandomExpressionTree(const size_t& maxDepth = 3, const double& pruneProbability = 0.0f) {
     
     if (maxDepth <= 0 || (rand() % 100) < (pruneProbability * 100)) {
-        return new ValueExpression<Type>( rand()%255 - 128);
+        return new ValueExpression<Type>( rand()/(float)__UINT32_MAX__ * 100 - 128.0f);
     }
 
     Expression<Type> * expression;
@@ -261,36 +275,25 @@ void SelectTopIndividuals(const std::vector<std::pair<Expression<Type>*, double>
 
 // Function to mutate a subtree in an expression tree
 template<typename Type>
-void MutateSubtree(Expression<Type>* tree, const size_t & maxDepth = 2, const double& prunningProbability = 0.0f) {
-    // For simplicity, let's randomly replace a leaf node with a new random expression
+void MutateSubtree(Expression<Type>* tree, const size_t& maxDepth = 2, const double& prunningProbability = 0.0f) {
     if (rand() % 2 == 0) {
         delete tree->left;
-        tree->left = GenerateRandomExpressionTree<Type>(maxDepth, prunningProbability);  // Adjust the depth as needed
+        tree->left = GenerateRandomExpressionTree<Type>(maxDepth, prunningProbability);
     } else {
         delete tree->right;
-        tree->right = GenerateRandomExpressionTree<Type>(maxDepth, prunningProbability); // Adjust the depth as needed
+        tree->right = GenerateRandomExpressionTree<Type>(maxDepth, prunningProbability);
     }
 }
 
-// Function to perform reproduction by crossover
 template<typename Type>
 Expression<Type>* Crossover(const Expression<Type>* parent1, const Expression<Type>* parent2) {
-    // Clone the parents
-    Expression<Type>* child1 = parent1->Clone();
-    Expression<Type>* child2 = parent2->Clone();
+    std::unique_ptr<Expression<Type>> child1 = std::unique_ptr<Expression<Type>>(parent1->Clone());
+    std::unique_ptr<Expression<Type>> child2 = std::unique_ptr<Expression<Type>>(parent2->Clone());
 
-    // Perform crossover (swap subtrees)
     std::swap(child1, child2);
 
-    Expression<Type>* selected = (rand() % 2 == 0) ? child1 : child2;
+    Expression<Type>* selected = (rand() % 2 == 0) ? child1.release() : child2.release();
 
-    if( selected == child1){
-        delete child2;
-    }else{
-        delete child1;
-    }
-
-    // Randomly choose which child to return
     return selected;
 }
 
@@ -375,7 +378,7 @@ void GeneticAlgorithm(const Type& target, const size_t& populationSize, const si
                   });
 
         if( isVerbose )
-            fprintf(stdout, "Generation %d, Best Fitness : %.6lf\n", generation+1, population.front().second);
+            fprintf(stdout, "Generation %d, Best Fitness : %.6lf, Best Depth : %d\n", generation+1, population.front().second, population.front().first->GetDepth());
 
         if(population.front().second >= 1.0f)
             break;
@@ -392,20 +395,116 @@ void GeneticAlgorithm(const Type& target, const size_t& populationSize, const si
     }
 }
 
+// Function to perform genetic algorithm for multiple target values
+template<typename Type>
+void MultiTargetGeneticAlgorithm(const std::vector<Type>& targets, const size_t& populationSize, const size_t& generations, const double& selectionPercentage, const size_t& maxDepth = 3, const double& prunningProbability = 0.0f, const bool& isVerbose = true) {
+    srand(time(nullptr));
 
-int main(int argc, char *argv[]){
+    // Initialize the population with random expression trees for each target
+    std::vector<std::vector<std::pair<Expression<Type>*, double>>> populations;
+    populations.reserve(targets.size());
 
-    // Specify the target value and genetic algorithm parameters
-    float targetValue = 42; //Now only float and double are handled properly
+    for (const auto& target : targets) {
+        populations.emplace_back(GeneratePopulation(target, populationSize, maxDepth, 0.0f));
+    }
+
+    // Main loop for generations
+    for (size_t generation = 0; generation < generations; ++generation) {
+        // Select the top individuals for each target
+        std::vector<std::vector<Expression<Type>*>> selectedPopulations;
+        selectedPopulations.reserve(targets.size());
+
+        for (size_t i = 0; i < targets.size(); ++i) {
+            std::vector<Expression<Type>*> selectedPopulation;
+            SelectTopIndividuals(populations[i], selectedPopulation, selectionPercentage);
+            selectedPopulations.emplace_back(selectedPopulation);
+        }
+
+        // Reproduce the selected individuals for each target
+        std::vector<std::vector<std::pair<Expression<Type>*, double>>> newPopulations;
+        newPopulations.reserve(targets.size());
+
+        for (size_t i = 0; i < targets.size(); ++i) {
+            std::vector<std::pair<Expression<Type>*, double>> newPopulation;
+            newPopulation.reserve(populationSize);
+
+            while (newPopulation.size() < populationSize) {
+                // Randomly choose parents from the selected population for each target
+                size_t parentIndex1 = rand() % selectedPopulations[i].size();
+                size_t parentIndex2 = rand() % selectedPopulations[i].size();
+
+                Expression<Type>* child;
+
+                // Perform crossover or mutation based on probability
+                if (rand() % 2 == 0) {
+                    // Crossover
+                    child = Crossover(selectedPopulations[i][parentIndex1], selectedPopulations[i][parentIndex2]);
+                } else {
+                    // Mutation
+                    child = Mutate(selectedPopulations[i][parentIndex1], maxDepth >> 1, prunningProbability);
+                }
+
+                double fitness = EvaluateFitness(child, targets[i]);
+                newPopulation.emplace_back(std::make_pair(child, fitness));
+            }
+
+            newPopulations.emplace_back(newPopulation);
+        }
+
+        // Clean up old populations
+        for (size_t i = 0; i < populations.size(); ++i) {
+            for (auto& entry : populations[i]) {
+                delete entry.first;
+            }
+        }
+
+        // Update the populations with the new ones
+        populations = std::move(newPopulations);
+
+        // Output the best individual in each target for the current generation
+        for (size_t i = 0; i < targets.size(); ++i) {
+            std::sort(populations[i].begin(), populations[i].end(),
+                      [](const auto& a, const auto& b) {
+                          return a.second > b.second;
+                      });
+
+            if (isVerbose)
+                fprintf(stdout, "Generation %d, Target %zu, Best Fitness : %.6lf, Best Depth : %d\n", generation + 1, i + 1, populations[i].front().second, populations[i].front().first->GetDepth());
+
+            if (populations[i].front().second >= 1.0f)
+                break;  // Stop if the target is achieved
+        }
+    }
+
+    // Output the best individual for each target
+    for (size_t i = 0; i < targets.size(); ++i) {
+        Expression<Type>* bestExpression = populations[i].front().first;
+
+        bestExpression->Show();
+        fprintf(stdout, "\nTarget %zu Value : %lf\n", i + 1, bestExpression->Evaluate());
+    }
+
+    // Clean up the final populations
+    for (size_t i = 0; i < populations.size(); ++i) {
+        for (auto& entry : populations[i]) {
+            delete entry.first;
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+
+    // Specify the target values and genetic algorithm parameters
+    std::vector<float> targetValues = {1.0f}; // Add more target values as needed
     size_t populationSize = 100;
-    size_t generations = 1000;
-    double selectionPercentage = 0.2;
-    size_t maxDepth = 2;
+    size_t generations = 100000;
+    double selectionPercentage = 0.1;
+    size_t maxPrefferedDepth = 7;
     double prunningProbability = 0.1f;
     bool isVerbal = true;
 
-    // Run the genetic algorithm
-    GeneticAlgorithm(targetValue, populationSize, generations, selectionPercentage, maxDepth, prunningProbability, isVerbal);
+    // Run the genetic algorithm for multiple targets
+    MultiTargetGeneticAlgorithm(targetValues, populationSize, generations, selectionPercentage, maxPrefferedDepth, prunningProbability, isVerbal);
 
     return 0;
 }
